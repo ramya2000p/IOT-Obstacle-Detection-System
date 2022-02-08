@@ -1,1 +1,1 @@
-# IOT-Obstacle-Detetction-System
+# IOT-Obstacle-Detection-System
