@@ -1,58 +1,65 @@
 #include <ESP8266WiFi.h>
-#include "Adafruit_MQTT.h"
-#include "Adafruit_MQTT_Client.h"
+
+const char* ssid = "Ramya's Phone";
+const char* password = "ramyaPandian";
+
+WiFiServer server(80);
+String state;
 
 const int TRIG_PIN = D5;
 const int ECHO_PIN = D6;
+const int YELLOW_LED = D3;
+const int GREEN_LED = D2;
+const int BLUE_LED = D1;
 
 long duration;
-int distanceCM;
-int sum;
-double average;
+int distance;
 
-#define SSID "Ramya's Phone"
-#define PASS "ramyaPandian"
-
-#define AIO_SERVER "io.adafruit.com"
-#define AIO_SERVERPORT 1883
-
-#define AIO_USERNAME  "ramya_pandian"
-#define AIO_KEY       "aio_kfju38hwK95ghiZJxA06564vy9fW"
-
-WiFiClient client;
-
-Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
-
-Adafruit_MQTT_Publish distance = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/assignment-2-distance-group.safe-state-feed");
-
-//Connect to the server
-void MQTT_connect();
 void setup() {
   Serial.begin(9600);
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
+  pinMode(YELLOW_LED, OUTPUT);
+  pinMode(GREEN_LED, OUTPUT);
+  pinMode(BLUE_LED, OUTPUT);
 
-  delay(10);
+  digitalWrite(YELLOW_LED, LOW);
+  digitalWrite(GREEN_LED, LOW);
+  digitalWrite(BLUE_LED, LOW);
 
-  Serial.println("Adafruit MQTT");
-  Serial.println("Connecting to ");
-  Serial.println(SSID);
-  WiFi.begin(SSID, PASS);
-  while(WiFi.status() != 3){
-    delay(500);
-    Serial.print(".");
+ WiFi.begin(ssid, password);
+
+  while(WiFi.status() != WL_CONNECTED){
+    delay(1000); 
   }
-  Serial.println();
+
+  Serial.print("Controller has connect to WLAN");
+
+  server.begin();
+  Serial.println("Server started at port 80");
+
+  Serial.print("URL: ");
+  Serial.print("http://");
+  Serial.print(WiFi.localIP());
+  Serial.println("/");
 
 }
 
 void loop() {
-  MQTT_connect();
+   //Check if the server has established
+  WiFiClient client = server.available();
+  if(!client) return;
 
-  sum = 0;
-  
-  for(int x = 0; x < 10; x++){
+  //Wait until the client sends the data
+  while(!client.available())
+  delay(1);
 
+  //Receive message from client
+  String request = client.readStringUntil('\r');
+  Serial.println(request);
+  client.flush();
+
+  //set a period for an ultrasonic wave.
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(5);
   digitalWrite(TRIG_PIN, HIGH);
@@ -60,53 +67,68 @@ void loop() {
   digitalWrite(TRIG_PIN, LOW);
 
   duration = pulseIn(ECHO_PIN, HIGH); //Time duration of the feedback wave.
-  distanceCM = duration * 0.034 / 2; //Distance in centimeters
-  Serial.println("This is the distance: ");
-  Serial.println(distanceCM);
 
-  sum += distanceCM;
-  Serial.println("This is the sum: ");
-  Serial.println(sum);
-  delay(1500);
+  distance = duration * 0.034 / 2; //Distance in centimeters
+ 
+  Serial.print(distance);
+
+  if(distance > 100 && distance <= 400){ //safe state
+    digitalWrite(BLUE_LED, LOW);
+    digitalWrite(GREEN_LED, HIGH);
+    digitalWrite(YELLOW_LED, LOW);
+
+    state = "SAFE";
+  }
+  else if(distance <= 100 && distance > 20){ //moderate state
+    digitalWrite(BLUE_LED, LOW);
+    digitalWrite(GREEN_LED, LOW);
+    digitalWrite(YELLOW_LED, HIGH);
+
+    state = "MODERATE";
+  }
+  else if(distance <= 20 && distance >= 2){ //unsafe state
+    digitalWrite(BLUE_LED, HIGH);
+    digitalWrite(GREEN_LED, LOW);
+    digitalWrite(YELLOW_LED, LOW);
+
+    state = "UNSAFE";
+  }
+  else if(distance < 2 || distance > 400){ //error state
+    digitalWrite(BLUE_LED, HIGH);
+    digitalWrite(GREEN_LED, HIGH);
+    digitalWrite(YELLOW_LED, HIGH);
+    state = "ERROR";
   }
 
-  average = sum/10;
-  Serial.println("THIS IS THE AVERAGE DISTANCE: ");
-  Serial.print(average);
 
-  //Write to Adafruit MQTT server
-  Serial.print("\nSending average distance value. ");
-  Serial.print(average);
-  Serial.print("...");
-  if(!distance.publish(average))
-    Serial.print("Send failed");
-  else
-    Serial.println("OK!");
+  client.println("HTTP/1.1 200 OK");
+  client.println("Content-Type: text/html");
+  client.println("Refresh: 5");
+  client.println("");
 
-  
-  if(!mqtt.ping())
-    mqtt.disconnect();
+  //Personalise your own webpage here with html code:
+  client.println("<!DOCTYPE HTML>");
+  client.println("<html>");
+  client.println("<head>");
+  client.println("<meta charset='utf-8'/>");
+  client.println("<title>Ramya's Obstacle Sensing Module</title>");
+  client.println("</head>");
+  client.println("<body>");
+  client.println("<h1>Obstacle Detector</h1>");
 
-}
+  client.println("<br/><br/>");
+  client.println("<h2>The distance is: ");
+  client.print(distance);
+  client.print("cm</h2>");
 
-void MQTT_connect(){
-int8_t ret;
+  client.println("<h2>The obstacle is in a ");
+  client.print(state);
+  client.print(" state!<h2>");
 
- // Stop if already connected.
-if(mqtt.connected())
-return;
+  client.println("</body>");
+  client.println("</html>");
 
- Serial.print("Connecting to MQTT... ");
+  delay(1); //1 millisecond delay
+ 
 
- uint8_t retries = 3;
-while((ret = mqtt.connect()) != 0){ 
-Serial.println(mqtt.connectErrorString(ret));
-Serial.println("Retrying MQTT connection in 5 seconds...");
-mqtt.disconnect();
-delay(10000); 
-retries--;
-if(retries == 0)
-while (1); 
-}
-Serial.println("MQTT Connected!");
 }
